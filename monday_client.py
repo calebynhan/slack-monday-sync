@@ -49,17 +49,34 @@ def _run(query: str, variables: dict | None = None) -> dict:
     return data
 
 
-def create_item(board_id: str, item_name: str, column_values: dict | None = None) -> str:
-    """Create an item on the board and return its ID."""
+def create_item(
+    board_id: str,
+    item_name: str,
+    group_id: str | None = None,
+    column_values: dict | None = None,
+) -> str:
+    """Create an item on the board (optionally in a specific group) and return its ID."""
     cv_json = "{}" if not column_values else json.dumps(column_values)
-    query = """
-    mutation ($board: ID!, $name: String!, $cv: JSON!) {
-      create_item(board_id: $board, item_name: $name, column_values: $cv) {
-        id
-      }
-    }
-    """
-    result = _run(query, {"board": board_id, "name": item_name, "cv": cv_json})
+    if group_id:
+        query = """
+        mutation ($board: ID!, $group: String!, $name: String!, $cv: JSON!) {
+          create_item(board_id: $board, group_id: $group, item_name: $name, column_values: $cv) {
+            id
+          }
+        }
+        """
+        variables = {"board": board_id, "group": group_id, "name": item_name, "cv": cv_json}
+    else:
+        query = """
+        mutation ($board: ID!, $name: String!, $cv: JSON!) {
+          create_item(board_id: $board, item_name: $name, column_values: $cv) {
+            id
+          }
+        }
+        """
+        variables = {"board": board_id, "name": item_name, "cv": cv_json}
+
+    result = _run(query, variables)
     return result["data"]["create_item"]["id"]
 
 
@@ -81,8 +98,8 @@ def get_item_url(board_id: str, item_id: str) -> str:
     return f"https://app.monday.com/boards/{board_id}/items/{item_id}"
 
 
-def get_board_columns(board_id: str) -> list[dict]:
-    """Return column metadata for a board. Useful for initial setup."""
+def get_board_info(board_id: str) -> dict:
+    """Return board name, columns, and groups. Used by inspect_board.py."""
     query = """
     query ($board: ID!) {
       boards(ids: [$board]) {
@@ -97,3 +114,10 @@ def get_board_columns(board_id: str) -> list[dict]:
     if not boards:
         raise MondayError(f"Board {board_id} not found or not accessible")
     return boards[0]
+
+
+def get_me() -> dict:
+    """Return the current user's Monday ID and name."""
+    query = "{ me { id name } }"
+    result = _run(query)
+    return result["data"]["me"]
