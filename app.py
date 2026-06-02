@@ -2,22 +2,29 @@
 Slack → Monday.com sync bot.
 
 Trigger: @mention the bot in any Slack thread (e.g. "@issue-bot create").
-The bot reads every message in that thread authored by any user, parses
-bullet points labelled Bug / Enhancement / Feature, and creates one Monday
-item per bullet.  It then replies in the thread with links to the new items.
+The bot reads every message in that thread, parses bullet points labelled
+Bug / Enhancement / Feature, and creates one Monday item per bullet:
+  - Bug      → Bugs Queue board,    Dev Bugs Queue group
+  - Enhancement / Feature → Enhancements board, Incoming Enhancements group
 
 Required environment variables (copy .env.example → .env and fill in):
-  SLACK_BOT_TOKEN       xoxb-...
-  SLACK_SIGNING_SECRET  ...
-  SLACK_APP_TOKEN       xapp-... (for Socket Mode — recommended)
-  MONDAY_API_TOKEN      ...
-  MONDAY_BOARD_ID       numeric board ID
+  SLACK_BOT_TOKEN                 xoxb-...
+  SLACK_SIGNING_SECRET            ...
+  SLACK_APP_TOKEN                 xapp-... (Socket Mode — recommended)
+  MONDAY_API_TOKEN                ...
+  MONDAY_BUGS_BOARD_ID            numeric ID of the Bugs Queue board
+  MONDAY_BUGS_GROUP_ID            group ID of "Dev Bugs Queue" group
+  MONDAY_ENHANCEMENTS_BOARD_ID    numeric ID of the Enhancements board
+  MONDAY_ENHANCEMENTS_GROUP_ID    group ID of "Incoming Enhancements" group
+  MONDAY_REPORTER_ID              your Monday user ID (run inspect_board.py to find it)
 
 Optional:
-  SLACK_BOT_USER_ID     U... (auto-fetched on startup if not set)
-  MONDAY_STATUS_COLUMN_ID  column ID for the label (Bug/Enhancement/Feature)
-  MONDAY_TEXT_COLUMN_ID    column ID for long-text notes
-  PORT                  default 3000
+  SLACK_BOT_USER_ID               auto-fetched on first run if not set
+  MONDAY_BUGS_REPORTER_COL        column ID for Reporter on Bugs board
+  MONDAY_ENH_REPORTER_COL         column ID for Reporter on Enhancements board
+  PORT                            default 3000
+
+Run `python inspect_board.py` after setup to find group IDs, column IDs, and your user ID.
 """
 
 import logging
@@ -41,19 +48,20 @@ app = App(
     signing_secret=os.environ["SLACK_SIGNING_SECRET"],
 )
 
-BOARD_ID = os.environ["MONDAY_BOARD_ID"]
-STATUS_COL = os.environ.get("MONDAY_STATUS_COLUMN_ID", "")
-TEXT_COL = os.environ.get("MONDAY_TEXT_COLUMN_ID", "")
-MAX_ITEMS_PER_RUN = 25  # safety cap to prevent accidental mass creation
+# Board / group routing
+BUGS_BOARD_ID       = os.environ["MONDAY_BUGS_BOARD_ID"]
+BUGS_GROUP_ID       = os.environ.get("MONDAY_BUGS_GROUP_ID", "")
+ENH_BOARD_ID        = os.environ["MONDAY_ENHANCEMENTS_BOARD_ID"]
+ENH_GROUP_ID        = os.environ.get("MONDAY_ENHANCEMENTS_GROUP_ID", "")
 
+# Reporter column IDs (may differ between boards)
+BUGS_REPORTER_COL   = os.environ.get("MONDAY_BUGS_REPORTER_COL", "")
+ENH_REPORTER_COL    = os.environ.get("MONDAY_ENH_REPORTER_COL", "")
 
-# Label → Monday status value mapping.
-# Adjust these to match your board's actual status labels.
-STATUS_MAP = {
-    "Bug": "Bug",
-    "Enhancement": "Enhancement",
-    "Feature": "Feature Request",
-}
+# Monday user ID for "Caleb Han" — set via MONDAY_REPORTER_ID env var
+REPORTER_ID         = os.environ.get("MONDAY_REPORTER_ID", "")
+
+MAX_ITEMS_PER_RUN = 25
 
 _bot_user_id_cache: str = ""
 
@@ -98,6 +106,15 @@ def _build_update_body(issue: dict) -> str:
     return "\n".join(parts) if parts else "(no additional details)"
 
 
+def _routing(label: str) -> tuple[str, str, str]:
+    """Return (board_id, group_id, reporter_col_id) for a given label."""
+    if label == "Bug":
+        return BUGS_BOARD_ID, BUGS_GROUP_ID, BUGS_REPORTER_COL
+    else:
+        # Enhancement and Feature both go to the Enhancements board
+        return ENH_BOARD_ID, ENH_GROUP_ID, ENH_REPORTER_COL
+
+
 @app.event("app_mention")
 def handle_mention(event, client, say):
     channel = event["channel"]
@@ -126,9 +143,7 @@ def handle_mention(event, client, say):
         say(text=":x: Could not read thread messages. Check bot channel permissions.", thread_ts=thread_ts)
         return
 
-    # Exclude the bot's own messages so it doesn't parse its own replies.
     user_messages = [m for m in messages if m.get("user") != bot_user_id]
-
     issues = parse_thread(user_messages)
 
     if not issues:
@@ -144,8 +159,8 @@ def handle_mention(event, client, say):
     if len(issues) > MAX_ITEMS_PER_RUN:
         say(
             text=(
-                f":warning: Found {len(issues)} items — that's over the safety limit of {MAX_ITEMS_PER_RUN} "
-                f"per run. Please split into multiple threads or raise MAX_ITEMS_PER_RUN if intentional."
+                f":warning: Found {len(issues)} items — over the safety limit of {MAX_ITEMS_PER_RUN}. "
+                f"Please split into multiple threads or raise MAX_ITEMS_PER_RUN."
             ),
             thread_ts=thread_ts,
         )
@@ -158,27 +173,29 @@ def handle_mention(event, client, say):
 
     for issue in issues:
         try:
+            board_id, group_id, reporter_col = _routing(issue["label"])
+
             column_values: dict = {}
-            if STATUS_COL:
-                status_label = STATUS_MAP.get(issue["label"], issue["label"])
-                column_values[STATUS_COL] = {"label": status_label}
-            if TEXT_COL and issue["body"]:
-                column_values[TEXT_COL] = {"text": issue["body"][:2000]}
+            if reporter_col and REPORTER_ID:
+                column_values[reporter_col] = {
+                    "personsAndTeams": [{"id": int(REPORTER_ID), "kind": "person"}]
+                }
 
             item_id = monday_client.create_item(
-                board_id=BOARD_ID,
+                board_id=board_id,
                 item_name=safe_item_name(issue["label"], issue["title"]),
+                group_id=group_id or None,
                 column_values=column_values if column_values else None,
             )
 
             update_body = _build_update_body(issue)
             monday_client.add_update(item_id, update_body)
 
-            url = monday_client.get_item_url(BOARD_ID, item_id)
+            url = monday_client.get_item_url(board_id, item_id)
             created_links.append(
                 f"• *[{issue['label']}]* {issue['title']} → <{url}|View on Monday>"
             )
-            log.info("Created Monday item %s for '%s'", item_id, issue["title"])
+            log.info("Created Monday item %s for '%s' on board %s", item_id, issue["title"], board_id)
 
         except monday_client.MondayError as exc:
             log.error("Monday API error for '%s': %s", issue.get("title"), exc)
