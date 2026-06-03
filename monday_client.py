@@ -119,30 +119,24 @@ def get_board_info(board_id: str) -> dict:
 
 def upload_file_to_update(update_id: str, file_content: bytes, filename: str) -> str:
     """Upload a file to a Monday update (attaches to the Files section). Returns asset ID."""
-    query = """
-    mutation ($update_id: ID!, $file: File!) {
-      add_file_to_update(update_id: $update_id, file: $file) {
-        id
-      }
-    }
-    """
-    # Monday file uploads use multipart/form-data with the query as a field
-    variables = json.dumps({"update_id": update_id, "file": None})
+    # Monday's file upload uses a dedicated endpoint and a simpler multipart format
+    # where the file is sent as `variables[file]`. See:
+    # https://developer.monday.com/api-reference/reference/assets-1
+    query = (
+        f"mutation ($file: File!) {{ "
+        f"add_file_to_update (update_id: {update_id}, file: $file) {{ id }} "
+        f"}}"
+    )
     try:
         resp = requests.post(
-            MONDAY_API_URL,
+            "https://api.monday.com/v2/file",
             headers={
                 "Authorization": os.environ["MONDAY_API_TOKEN"],
                 "API-Version": "2023-10",
-                # No Content-Type — requests sets it automatically for multipart
             },
-            data={
-                "query": query,
-                "variables": variables,
-                "map": json.dumps({"file": ["variables.file"]}),
-            },
-            files={"file": (filename, file_content)},
-            timeout=30,
+            data={"query": query},
+            files={"variables[file]": (filename, file_content)},
+            timeout=60,
         )
         resp.raise_for_status()
     except requests.HTTPError as exc:
@@ -155,8 +149,10 @@ def upload_file_to_update(update_id: str, file_content: bytes, filename: str) ->
     except ValueError as exc:
         raise MondayError("Monday API returned non-JSON response during file upload") from exc
 
-    if "errors" in data:
-        messages = [e.get("message", str(e)) for e in data["errors"]]
+    if "errors" in data or "error_message" in data:
+        messages = [e.get("message", str(e)) for e in data.get("errors", [])]
+        if "error_message" in data:
+            messages.append(data["error_message"])
         raise MondayError(f"Monday file upload error: {'; '.join(messages)}")
 
     return data["data"]["add_file_to_update"]["id"]

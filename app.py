@@ -281,12 +281,14 @@ def handle_mention(event, client, say):
             slack_token = os.environ.get("SLACK_BOT_TOKEN", "")
             for f in issue["files"]:
                 content = _download_slack_file(f["url"], slack_token)
-                if content:
-                    try:
-                        monday_client.upload_file_to_update(update_id, content, f["name"])
-                        log.info("Uploaded file '%s' to Monday update %s", f["name"], update_id)
-                    except monday_client.MondayError:
-                        log.exception("Failed to upload file '%s' to Monday", f["name"])
+                if not content:
+                    log.warning("Skipped upload — could not download '%s' from Slack", f["name"])
+                    continue
+                try:
+                    monday_client.upload_file_to_update(update_id, content, f["name"])
+                    log.info("Uploaded file '%s' (%d bytes) to Monday update %s", f["name"], len(content), update_id)
+                except monday_client.MondayError:
+                    log.exception("Failed to upload file '%s' to Monday", f["name"])
 
             url = monday_client.get_item_url(board_id, item_id)
             created_links.append(
