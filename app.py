@@ -279,14 +279,18 @@ def handle_mention(event, client, say):
 
             # Upload attached files directly to the Monday update
             slack_token = os.environ.get("SLACK_BOT_TOKEN", "")
+            log.info("Issue '%s' has %d file(s) to upload", issue["title"], len(issue["files"]))
             for f in issue["files"]:
+                log.info("Downloading '%s' from Slack: %s", f["name"], f["url"])
                 content = _download_slack_file(f["url"], slack_token)
                 if not content:
                     log.warning("Skipped upload — could not download '%s' from Slack", f["name"])
                     continue
+                mimetype = f.get("mimetype", "application/octet-stream")
+                log.info("Uploading '%s' (%d bytes, %s) to Monday update %s", f["name"], len(content), mimetype, update_id)
                 try:
-                    monday_client.upload_file_to_update(update_id, content, f["name"])
-                    log.info("Uploaded file '%s' (%d bytes) to Monday update %s", f["name"], len(content), update_id)
+                    monday_client.upload_file_to_update(update_id, content, f["name"], mimetype)
+                    log.info("SUCCESS: uploaded '%s' to Monday update %s", f["name"], update_id)
                 except monday_client.MondayError:
                     log.exception("Failed to upload file '%s' to Monday", f["name"])
 

@@ -117,16 +117,9 @@ def get_board_info(board_id: str) -> dict:
     return boards[0]
 
 
-def upload_file_to_update(update_id: str, file_content: bytes, filename: str) -> str:
+def upload_file_to_update(update_id: str, file_content: bytes, filename: str, mimetype: str = "application/octet-stream") -> str:
     """Upload a file to a Monday update (attaches to the Files section). Returns asset ID."""
-    # Monday's file upload uses a dedicated endpoint and a simpler multipart format
-    # where the file is sent as `variables[file]`. See:
-    # https://developer.monday.com/api-reference/reference/assets-1
-    query = (
-        f"mutation ($file: File!) {{ "
-        f"add_file_to_update (update_id: {update_id}, file: $file) {{ id }} "
-        f"}}"
-    )
+    query = f"mutation ($file: File!) {{ add_file_to_update (update_id: {update_id}, file: $file) {{ id }} }}"
     try:
         resp = requests.post(
             "https://api.monday.com/v2/file",
@@ -135,12 +128,17 @@ def upload_file_to_update(update_id: str, file_content: bytes, filename: str) ->
                 "API-Version": "2023-10",
             },
             data={"query": query},
-            files={"variables[file]": (filename, file_content)},
+            files={"variables[file]": (filename, file_content, mimetype)},
             timeout=60,
         )
         resp.raise_for_status()
     except requests.HTTPError as exc:
-        raise MondayError(f"HTTP {exc.response.status_code} uploading file to Monday") from exc
+        body = ""
+        try:
+            body = exc.response.text[:500]
+        except Exception:
+            pass
+        raise MondayError(f"HTTP {exc.response.status_code} uploading file to Monday: {body}") from exc
     except requests.RequestException as exc:
         raise MondayError(f"Network error uploading file: {type(exc).__name__}") from exc
 

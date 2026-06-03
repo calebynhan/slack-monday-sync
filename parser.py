@@ -108,8 +108,10 @@ def _extract_files(msg: dict) -> list[dict]:
     result = []
     for f in msg.get("files", []):
         name = f.get("name", f.get("id", "file"))
-        # Prefer the private download URL; fall back to permalink
-        url = f.get("url_private", f.get("permalink", ""))
+        mimetype = f.get("mimetype", "application/octet-stream")
+        # url_private_download is the correct URL for downloading file bytes;
+        # url_private is a view URL that may redirect rather than stream bytes.
+        url = f.get("url_private_download") or f.get("url_private") or f.get("permalink", "")
         if url:
-            result.append({"name": name, "url": url})
+            result.append({"name": name, "url": url, "mimetype": mimetype})
     return result
