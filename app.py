@@ -115,36 +115,45 @@ def _routing(label: str) -> tuple[str, str, str]:
         return ENH_BOARD_ID, ENH_GROUP_ID, ENH_REPORTER_COL
 
 
+def _strip_bot_mention(text: str, bot_user_id: str) -> str:
+    """Remove the @mention from the message so it doesn't interfere with parsing."""
+    import re
+    return re.sub(rf"<@{bot_user_id}>", "", text).strip()
+
+
 @app.event("app_mention")
 def handle_mention(event, client, say):
     channel = event["channel"]
     thread_ts = event.get("thread_ts") or event["ts"]
     bot_user_id = _get_bot_user_id(client)
 
-    text_lower = event.get("text", "").lower()
-    trigger_words = ("create", "sync", "add", "log", "push")
-    if not any(w in text_lower for w in trigger_words):
-        say(
-            text=(
-                "Hi! Mention me with *create* (or sync/add/log/push) inside a thread "
-                "to push all Bug/Enhancement/Feature bullets to Monday. Example:\n"
-                "`@issue-bot create`"
-            ),
-            thread_ts=thread_ts,
-        )
-        return
-
     log.info("Trigger received in channel=%s thread=%s", channel, thread_ts)
 
+    # Build a synthetic message from the mention itself (bot mention stripped)
+    # so bullets written in the same message as @bot are parsed too.
+    mention_text = _strip_bot_mention(event.get("text", ""), bot_user_id)
+    mention_msg = {
+        "text": mention_text,
+        "user": event.get("user", ""),
+        "ts": event["ts"],
+        "files": event.get("files", []),
+    }
+
     try:
-        messages = _fetch_thread(client, channel, thread_ts)
+        thread_messages = _fetch_thread(client, channel, thread_ts)
     except Exception:
         log.exception("Failed to fetch thread")
         say(text=":x: Could not read thread messages. Check bot channel permissions.", thread_ts=thread_ts)
         return
 
-    user_messages = [m for m in messages if m.get("user") != bot_user_id]
-    issues = parse_thread(user_messages)
+    # Exclude bot messages and the mention message itself (we already have it above)
+    other_messages = [
+        m for m in thread_messages
+        if m.get("user") != bot_user_id and m.get("ts") != event["ts"]
+    ]
+
+    # Parse: rest of thread first, then the mention message (so mention bullets aren't duplicated)
+    issues = parse_thread(other_messages + [mention_msg])
 
     if not issues:
         say(
