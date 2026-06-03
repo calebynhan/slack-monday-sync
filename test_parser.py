@@ -249,6 +249,22 @@ def test_resolve_image_refs_case_insensitive():
     assert "shot.png" in _resolve_image_refs("(Image 1)", file_index)
 
 
+def test_resolve_video_refs():
+    from utils import resolve_image_refs as _resolve_image_refs
+    file_index = [
+        {"name": "screen.png", "url": "https://slack.com/img"},
+        {"name": "demo.mp4", "url": "https://slack.com/vid"},
+    ]
+    result = _resolve_image_refs("See (video 2) for the demo", file_index)
+    assert "demo.mp4" in result
+
+    result = _resolve_image_refs("(Vid 2)", file_index)
+    assert "demo.mp4" in result
+
+    result = _resolve_image_refs("(VIDEO 2)", file_index)
+    assert "demo.mp4" in result
+
+
 def test_resolve_image_refs_no_refs_unchanged():
     from utils import resolve_image_refs as _resolve_image_refs
     assert _resolve_image_refs("No references here", []) == "No references here"
