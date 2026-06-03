@@ -116,6 +116,18 @@ def get_board_info(board_id: str) -> dict:
     return boards[0]
 
 
+def delete_item(item_id: str) -> None:
+    """Permanently delete an item from Monday."""
+    query = """
+    mutation ($item: ID!) {
+      delete_item(item_id: $item) {
+        id
+      }
+    }
+    """
+    _run(query, {"item": item_id})
+
+
 def get_me() -> dict:
     """Return the current user's Monday ID and name."""
     query = "{ me { id name } }"

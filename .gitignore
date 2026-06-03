@@ -1,4 +1,6 @@
 .env
+undo_log.json
+venv/
 
 __pycache__/
 *.pyc
