@@ -95,7 +95,8 @@ def add_update(item_id: str, body: str) -> str:
 
 def get_item_url(board_id: str, item_id: str) -> str:
     """Return a direct link to the item on Monday."""
-    return f"https://app.monday.com/boards/{board_id}/items/{item_id}"
+    subdomain = os.environ.get("MONDAY_SUBDOMAIN", "app")
+    return f"https://{subdomain}.monday.com/boards/{board_id}/pulses/{item_id}"
 
 
 def get_board_info(board_id: str) -> dict:
