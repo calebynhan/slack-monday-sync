@@ -247,8 +247,8 @@ def test_resolve_image_refs_replaces_correctly():
         {"name": "screen2.png", "url": "https://slack.com/f2"},
     ]
     result = _resolve_image_refs("See (Image 1) and also (Image 2)", file_index)
-    assert "screen1.png: https://slack.com/f1" in result
-    assert "screen2.png: https://slack.com/f2" in result
+    assert "https://slack.com/f1" in result
+    assert "https://slack.com/f2" in result
 
 
 def test_resolve_image_refs_out_of_range_unchanged():
@@ -261,8 +261,8 @@ def test_resolve_image_refs_out_of_range_unchanged():
 def test_resolve_image_refs_bare_no_parens():
     from utils import resolve_image_refs as _resolve_image_refs
     file_index = [{"name": "shot.png", "url": "https://slack.com/s"}]
-    assert "shot.png" in _resolve_image_refs("Image 1", file_index)
-    assert "shot.png" in _resolve_image_refs("Video 1", file_index)
+    assert "https://slack.com/s" in _resolve_image_refs("Image 1", file_index)
+    assert "https://slack.com/s" in _resolve_image_refs("Video 1", file_index)
 
 
 def test_resolve_image_refs_multi_ampersand():
@@ -272,8 +272,8 @@ def test_resolve_image_refs_multi_ampersand():
         {"name": "b.png", "url": "https://slack.com/b"},
     ]
     result = _resolve_image_refs("Image 1 & 2", file_index)
-    assert "a.png" in result
-    assert "b.png" in result
+    assert "https://slack.com/a" in result
+    assert "https://slack.com/b" in result
 
 
 def test_resolve_image_refs_multi_comma():
@@ -283,16 +283,16 @@ def test_resolve_image_refs_multi_comma():
         {"name": "b.png", "url": "https://slack.com/b"},
     ]
     result = _resolve_image_refs("(Image 1, 2)", file_index)
-    assert "a.png" in result
-    assert "b.png" in result
+    assert "https://slack.com/a" in result
+    assert "https://slack.com/b" in result
 
 
 def test_resolve_image_refs_case_insensitive():
     from utils import resolve_image_refs as _resolve_image_refs
     file_index = [{"name": "shot.png", "url": "https://slack.com/s"}]
-    assert "shot.png" in _resolve_image_refs("(image 1)", file_index)
-    assert "shot.png" in _resolve_image_refs("(img 1)", file_index)
-    assert "shot.png" in _resolve_image_refs("(Image 1)", file_index)
+    assert "https://slack.com/s" in _resolve_image_refs("(image 1)", file_index)
+    assert "https://slack.com/s" in _resolve_image_refs("(img 1)", file_index)
+    assert "https://slack.com/s" in _resolve_image_refs("(Image 1)", file_index)
 
 
 def test_resolve_video_refs():
@@ -301,14 +301,9 @@ def test_resolve_video_refs():
         {"name": "screen.png", "url": "https://slack.com/img"},
         {"name": "demo.mp4", "url": "https://slack.com/vid"},
     ]
-    result = _resolve_image_refs("See (video 2) for the demo", file_index)
-    assert "demo.mp4" in result
-
-    result = _resolve_image_refs("(Vid 2)", file_index)
-    assert "demo.mp4" in result
-
-    result = _resolve_image_refs("(VIDEO 2)", file_index)
-    assert "demo.mp4" in result
+    assert "https://slack.com/vid" in _resolve_image_refs("See (video 2) for the demo", file_index)
+    assert "https://slack.com/vid" in _resolve_image_refs("(Vid 2)", file_index)
+    assert "https://slack.com/vid" in _resolve_image_refs("(VIDEO 2)", file_index)
 
 
 def test_resolve_image_refs_no_refs_unchanged():

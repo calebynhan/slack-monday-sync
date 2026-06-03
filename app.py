@@ -104,15 +104,29 @@ def _fetch_thread(client: WebClient, channel: str, thread_ts: str) -> list[dict]
 
 
 def _build_update_body(issue: dict, file_index: list[dict]) -> str:
-    parts = []
-    body = resolve_image_refs(issue["body"], file_index) if issue["body"] else ""
-    if body:
-        parts.append(body)
-    if issue["files"]:
-        parts.append("\n*Attachments* (Slack login required to view):")
-        for f in issue["files"]:
-            parts.append(f"• {f['name']}: {f['url']}")
-    return "\n".join(parts) if parts else "(no additional details)"
+    """Build the Monday update text. Each body line becomes a bullet point."""
+    lines = []
+    if issue["body"]:
+        for line in resolve_image_refs(issue["body"], file_index).splitlines():
+            line = line.strip()
+            if line:
+                lines.append(f"• {line}")
+    return "\n".join(lines) if lines else ""
+
+
+def _download_slack_file(url: str, slack_token: str) -> bytes | None:
+    """Download a private Slack file using the bot token."""
+    try:
+        resp = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {slack_token}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.content
+    except Exception:
+        log.exception("Failed to download Slack file: %s", url)
+        return None
 
 
 def _routing(label: str) -> tuple[str, str, str]:
@@ -245,7 +259,19 @@ def handle_mention(event, client, say):
                 column_values=column_values if column_values else None,
             )
 
-            monday_client.add_update(item_id, _build_update_body(issue, file_index))
+            update_body = _build_update_body(issue, file_index)
+            update_id = monday_client.add_update(item_id, update_body or "(no additional details)")
+
+            # Upload attached files directly to the Monday update
+            slack_token = os.environ.get("SLACK_BOT_TOKEN", "")
+            for f in issue["files"]:
+                content = _download_slack_file(f["url"], slack_token)
+                if content:
+                    try:
+                        monday_client.upload_file_to_update(update_id, content, f["name"])
+                        log.info("Uploaded file '%s' to Monday update %s", f["name"], update_id)
+                    except monday_client.MondayError:
+                        log.exception("Failed to upload file '%s' to Monday", f["name"])
 
             url = monday_client.get_item_url(board_id, item_id)
             created_links.append(

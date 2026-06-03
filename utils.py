@@ -55,8 +55,7 @@ def resolve_image_refs(text: str, file_index: list[dict]) -> str:
     """
     def _link(n: int) -> str:
         if 1 <= n <= len(file_index):
-            f = file_index[n - 1]
-            return f"{f['name']}: {f['url']}"
+            return file_index[n - 1]["url"]
         return f"(file {n} not found)"
 
     def replacer(m):

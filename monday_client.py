@@ -116,6 +116,51 @@ def get_board_info(board_id: str) -> dict:
     return boards[0]
 
 
+def upload_file_to_update(update_id: str, file_content: bytes, filename: str) -> str:
+    """Upload a file to a Monday update (attaches to the Files section). Returns asset ID."""
+    query = """
+    mutation ($update_id: ID!, $file: File!) {
+      add_file_to_update(update_id: $update_id, file: $file) {
+        id
+      }
+    }
+    """
+    # Monday file uploads use multipart/form-data with the query as a field
+    variables = json.dumps({"update_id": update_id, "file": None})
+    try:
+        resp = requests.post(
+            MONDAY_API_URL,
+            headers={
+                "Authorization": os.environ["MONDAY_API_TOKEN"],
+                "API-Version": "2023-10",
+                # No Content-Type — requests sets it automatically for multipart
+            },
+            data={
+                "query": query,
+                "variables": variables,
+                "map": json.dumps({"file": ["variables.file"]}),
+            },
+            files={"file": (filename, file_content)},
+            timeout=30,
+        )
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        raise MondayError(f"HTTP {exc.response.status_code} uploading file to Monday") from exc
+    except requests.RequestException as exc:
+        raise MondayError(f"Network error uploading file: {type(exc).__name__}") from exc
+
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise MondayError("Monday API returned non-JSON response during file upload") from exc
+
+    if "errors" in data:
+        messages = [e.get("message", str(e)) for e in data["errors"]]
+        raise MondayError(f"Monday file upload error: {'; '.join(messages)}")
+
+    return data["data"]["add_file_to_update"]["id"]
+
+
 def delete_item(item_id: str) -> None:
     """Permanently delete an item from Monday."""
     query = """
