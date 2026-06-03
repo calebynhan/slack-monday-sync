@@ -212,4 +212,43 @@ def test_title_truncation_in_safe_item_name():
 def test_safe_item_name_normal():
     from utils import safe_item_name
     result = safe_item_name("Bug", "Login crash")
-    assert result == "[Bug] Login crash"
+    assert result == "Login crash"  # no [Bug] prefix
+
+
+def test_safe_item_name_no_label_prefix():
+    from utils import safe_item_name
+    assert safe_item_name("Enhancement", "Dark mode") == "Dark mode"
+    assert safe_item_name("Feature", "PDF export") == "PDF export"
+
+
+# ── image reference resolution ────────────────────────────────────────────────
+
+def test_resolve_image_refs_replaces_correctly():
+    from utils import resolve_image_refs as _resolve_image_refs
+    file_index = [
+        {"name": "screen1.png", "url": "https://slack.com/f1"},
+        {"name": "screen2.png", "url": "https://slack.com/f2"},
+    ]
+    result = _resolve_image_refs("See (Image 1) and also (Image 2)", file_index)
+    assert "screen1.png: https://slack.com/f1" in result
+    assert "screen2.png: https://slack.com/f2" in result
+
+
+def test_resolve_image_refs_out_of_range_unchanged():
+    from utils import resolve_image_refs as _resolve_image_refs
+    file_index = [{"name": "a.png", "url": "https://slack.com/a"}]
+    result = _resolve_image_refs("See (Image 5)", file_index)
+    assert result == "See (Image 5)"
+
+
+def test_resolve_image_refs_case_insensitive():
+    from utils import resolve_image_refs as _resolve_image_refs
+    file_index = [{"name": "shot.png", "url": "https://slack.com/s"}]
+    assert "shot.png" in _resolve_image_refs("(image 1)", file_index)
+    assert "shot.png" in _resolve_image_refs("(img 1)", file_index)
+    assert "shot.png" in _resolve_image_refs("(Image 1)", file_index)
+
+
+def test_resolve_image_refs_no_refs_unchanged():
+    from utils import resolve_image_refs as _resolve_image_refs
+    assert _resolve_image_refs("No references here", []) == "No references here"
