@@ -36,6 +36,7 @@ import logging
 import os
 import re
 
+import requests
 from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -104,10 +105,13 @@ def _fetch_thread(client: WebClient, channel: str, thread_ts: str) -> list[dict]
 
 
 _FILES_NOTE = {
-    "Bug":         "• Image/Video of the bug found in the files section of this bug",
-    "Enhancement": "• Image/Video of enhancement found in the files section of this enhancement",
-    "Feature":     "• Image/Video of feature found in the files section of this feature",
+    "Bug":         "• Image/Video of the bug can be found in the Files tab of this item",
+    "Enhancement": "• Image/Video of this enhancement can be found in the Files tab of this item",
+    "Feature":     "• Image/Video of this feature can be found in the Files tab of this item",
 }
+
+# Detects "Image 1", "Video 2", "(img 1 & 2)" etc. in the raw body text.
+_MEDIA_REF_RE = re.compile(r"\b(?:image|img|video|vid)\s*\d+", re.IGNORECASE)
 
 
 def _build_update_body(issue: dict, file_index: list[dict]) -> str:
@@ -118,8 +122,13 @@ def _build_update_body(issue: dict, file_index: list[dict]) -> str:
             line = line.strip()
             if line:
                 lines.append(f"• {line}")
-    if issue["files"]:
-        note = _FILES_NOTE.get(issue["label"], "• Image/Video found in the files section")
+
+    # Add the "see Files tab" note if files are attached to this issue OR the
+    # body references an image/video (the file may attach to a sibling bullet
+    # in a multi-bullet message, so don't rely on issue["files"] alone).
+    has_media = bool(issue["files"]) or bool(_MEDIA_REF_RE.search(issue["body"]))
+    if has_media:
+        note = _FILES_NOTE.get(issue["label"], "• Image/Video can be found in the Files tab of this item")
         lines.append(note)
     return "\n".join(lines) if lines else ""
 
@@ -219,9 +228,13 @@ def handle_mention(event, client, say):
 
     all_messages = other_messages + [mention_msg]
 
+    # Build file_index only from messages by the same user who triggered the bot,
+    # so (Image 1) / (Video 2) refs only count that user's own attachments.
+    triggering_user = event.get("user", "")
     file_index: list[dict] = []
     for m in all_messages:
-        file_index.extend(_extract_files(m))
+        if m.get("user") == triggering_user:
+            file_index.extend(_extract_files(m))
 
     issues = parse_thread(all_messages)
 
@@ -274,14 +287,20 @@ def handle_mention(event, client, say):
 
             # Upload attached files directly to the Monday update
             slack_token = os.environ.get("SLACK_BOT_TOKEN", "")
+            log.info("Issue '%s' has %d file(s) to upload", issue["title"], len(issue["files"]))
             for f in issue["files"]:
+                log.info("Downloading '%s' from Slack: %s", f["name"], f["url"])
                 content = _download_slack_file(f["url"], slack_token)
-                if content:
-                    try:
-                        monday_client.upload_file_to_update(update_id, content, f["name"])
-                        log.info("Uploaded file '%s' to Monday update %s", f["name"], update_id)
-                    except monday_client.MondayError:
-                        log.exception("Failed to upload file '%s' to Monday", f["name"])
+                if not content:
+                    log.warning("Skipped upload — could not download '%s' from Slack", f["name"])
+                    continue
+                mimetype = f.get("mimetype", "application/octet-stream")
+                log.info("Uploading '%s' (%d bytes, %s) to Monday update %s", f["name"], len(content), mimetype, update_id)
+                try:
+                    monday_client.upload_file_to_update(update_id, content, f["name"], mimetype)
+                    log.info("SUCCESS: uploaded '%s' to Monday update %s", f["name"], update_id)
+                except monday_client.MondayError:
+                    log.exception("Failed to upload file '%s' to Monday", f["name"])
 
             url = monday_client.get_item_url(board_id, item_id)
             created_links.append(

@@ -239,71 +239,45 @@ def test_safe_item_name_no_label_prefix():
 
 
 # ── image reference resolution ────────────────────────────────────────────────
+# resolve_image_refs now strips file refs from body text (files are uploaded
+# directly to Monday's Files tab, so URL links in body are not needed).
 
-def test_resolve_image_refs_replaces_correctly():
+def test_resolve_image_refs_strips_single():
     from utils import resolve_image_refs as _resolve_image_refs
-    file_index = [
-        {"name": "screen1.png", "url": "https://slack.com/f1"},
-        {"name": "screen2.png", "url": "https://slack.com/f2"},
-    ]
-    result = _resolve_image_refs("See (Image 1) and also (Image 2)", file_index)
-    assert "https://slack.com/f1" in result
-    assert "https://slack.com/f2" in result
+    result = _resolve_image_refs("See (Image 1) and also (Image 2)", [])
+    assert "Image 1" not in result
+    assert "Image 2" not in result
 
 
-def test_resolve_image_refs_out_of_range_unchanged():
+def test_resolve_image_refs_strips_bare_no_parens():
     from utils import resolve_image_refs as _resolve_image_refs
-    file_index = [{"name": "a.png", "url": "https://slack.com/a"}]
-    result = _resolve_image_refs("See (Image 5)", file_index)
-    assert "file 5 not found" in result
+    assert "Image 1" not in _resolve_image_refs("Image 1", [])
+    assert "Video 1" not in _resolve_image_refs("Video 1", [])
 
 
-def test_resolve_image_refs_bare_no_parens():
+def test_resolve_image_refs_strips_multi_ampersand():
     from utils import resolve_image_refs as _resolve_image_refs
-    file_index = [{"name": "shot.png", "url": "https://slack.com/s"}]
-    assert "https://slack.com/s" in _resolve_image_refs("Image 1", file_index)
-    assert "https://slack.com/s" in _resolve_image_refs("Video 1", file_index)
+    result = _resolve_image_refs("Image 1 & 2", [])
+    assert "Image" not in result
 
 
-def test_resolve_image_refs_multi_ampersand():
+def test_resolve_image_refs_strips_multi_comma():
     from utils import resolve_image_refs as _resolve_image_refs
-    file_index = [
-        {"name": "a.png", "url": "https://slack.com/a"},
-        {"name": "b.png", "url": "https://slack.com/b"},
-    ]
-    result = _resolve_image_refs("Image 1 & 2", file_index)
-    assert "https://slack.com/a" in result
-    assert "https://slack.com/b" in result
-
-
-def test_resolve_image_refs_multi_comma():
-    from utils import resolve_image_refs as _resolve_image_refs
-    file_index = [
-        {"name": "a.png", "url": "https://slack.com/a"},
-        {"name": "b.png", "url": "https://slack.com/b"},
-    ]
-    result = _resolve_image_refs("(Image 1, 2)", file_index)
-    assert "https://slack.com/a" in result
-    assert "https://slack.com/b" in result
+    result = _resolve_image_refs("(Image 1, 2)", [])
+    assert "Image" not in result
 
 
 def test_resolve_image_refs_case_insensitive():
     from utils import resolve_image_refs as _resolve_image_refs
-    file_index = [{"name": "shot.png", "url": "https://slack.com/s"}]
-    assert "https://slack.com/s" in _resolve_image_refs("(image 1)", file_index)
-    assert "https://slack.com/s" in _resolve_image_refs("(img 1)", file_index)
-    assert "https://slack.com/s" in _resolve_image_refs("(Image 1)", file_index)
+    assert "image" not in _resolve_image_refs("(image 1)", []).lower()
+    assert "img" not in _resolve_image_refs("(img 1)", []).lower()
 
 
-def test_resolve_video_refs():
+def test_resolve_video_refs_stripped():
     from utils import resolve_image_refs as _resolve_image_refs
-    file_index = [
-        {"name": "screen.png", "url": "https://slack.com/img"},
-        {"name": "demo.mp4", "url": "https://slack.com/vid"},
-    ]
-    assert "https://slack.com/vid" in _resolve_image_refs("See (video 2) for the demo", file_index)
-    assert "https://slack.com/vid" in _resolve_image_refs("(Vid 2)", file_index)
-    assert "https://slack.com/vid" in _resolve_image_refs("(VIDEO 2)", file_index)
+    result = _resolve_image_refs("See (video 2) for the demo", [])
+    assert "video" not in result.lower()
+    assert "for the demo" in result
 
 
 def test_resolve_image_refs_no_refs_unchanged():

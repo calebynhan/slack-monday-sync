@@ -95,7 +95,8 @@ def add_update(item_id: str, body: str) -> str:
 
 def get_item_url(board_id: str, item_id: str) -> str:
     """Return a direct link to the item on Monday."""
-    return f"https://app.monday.com/boards/{board_id}/items/{item_id}"
+    subdomain = os.environ.get("MONDAY_SUBDOMAIN", "app")
+    return f"https://{subdomain}.monday.com/boards/{board_id}/pulses/{item_id}"
 
 
 def get_board_info(board_id: str) -> dict:
@@ -116,36 +117,28 @@ def get_board_info(board_id: str) -> dict:
     return boards[0]
 
 
-def upload_file_to_update(update_id: str, file_content: bytes, filename: str) -> str:
+def upload_file_to_update(update_id: str, file_content: bytes, filename: str, mimetype: str = "application/octet-stream") -> str:
     """Upload a file to a Monday update (attaches to the Files section). Returns asset ID."""
-    query = """
-    mutation ($update_id: ID!, $file: File!) {
-      add_file_to_update(update_id: $update_id, file: $file) {
-        id
-      }
-    }
-    """
-    # Monday file uploads use multipart/form-data with the query as a field
-    variables = json.dumps({"update_id": update_id, "file": None})
+    query = f"mutation ($file: File!) {{ add_file_to_update (update_id: {update_id}, file: $file) {{ id }} }}"
     try:
         resp = requests.post(
-            MONDAY_API_URL,
+            "https://api.monday.com/v2/file",
             headers={
                 "Authorization": os.environ["MONDAY_API_TOKEN"],
                 "API-Version": "2023-10",
-                # No Content-Type — requests sets it automatically for multipart
             },
-            data={
-                "query": query,
-                "variables": variables,
-                "map": json.dumps({"file": ["variables.file"]}),
-            },
-            files={"file": (filename, file_content)},
-            timeout=30,
+            data={"query": query},
+            files={"variables[file]": (filename, file_content, mimetype)},
+            timeout=60,
         )
         resp.raise_for_status()
     except requests.HTTPError as exc:
-        raise MondayError(f"HTTP {exc.response.status_code} uploading file to Monday") from exc
+        body = ""
+        try:
+            body = exc.response.text[:500]
+        except Exception:
+            pass
+        raise MondayError(f"HTTP {exc.response.status_code} uploading file to Monday: {body}") from exc
     except requests.RequestException as exc:
         raise MondayError(f"Network error uploading file: {type(exc).__name__}") from exc
 
@@ -154,8 +147,10 @@ def upload_file_to_update(update_id: str, file_content: bytes, filename: str) ->
     except ValueError as exc:
         raise MondayError("Monday API returned non-JSON response during file upload") from exc
 
-    if "errors" in data:
-        messages = [e.get("message", str(e)) for e in data["errors"]]
+    if "errors" in data or "error_message" in data:
+        messages = [e.get("message", str(e)) for e in data.get("errors", [])]
+        if "error_message" in data:
+            messages.append(data["error_message"])
         raise MondayError(f"Monday file upload error: {'; '.join(messages)}")
 
     return data["data"]["add_file_to_update"]["id"]

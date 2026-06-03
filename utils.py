@@ -45,33 +45,21 @@ def pop_created(thread_ts: str) -> list[dict]:
 
 def resolve_image_refs(text: str, file_index: list[dict]) -> str:
     """
-    Resolve file references in body text to Slack file name + URL.
+    Strip file references from body text (files are uploaded directly to Monday).
 
-    Supported formats (with or without parentheses):
+    Supported formats removed (with or without parentheses):
       Image 1         (Image 1)
       Video 2         (Video 2)
       Image 1 & 2     (Image 1 & 2)
       Image 1, 2      (img 1, 2)
     """
-    def _link(n: int) -> str:
-        if 1 <= n <= len(file_index):
-            return file_index[n - 1]["url"]
-        return f"(file {n} not found)"
-
-    def replacer(m):
-        n1 = int(m.group(2))
-        n2 = m.group(3)
-        if n2:
-            return f"{_link(n1)}\n{_link(int(n2))}"
-        return _link(n1)
-
     # Matches: optional ( + keyword + N + optional (& or ,) + optional N2 + optional )
     pattern = re.compile(
         r"\(?"
-        r"(image|img|video|vid)"
-        r"\s*(\d+)"
-        r"(?:\s*[&,]\s*(\d+))?"
+        r"(?:image|img|video|vid)"
+        r"\s*\d+"
+        r"(?:\s*[&,]\s*\d+)?"
         r"\)?",
         re.IGNORECASE,
     )
-    return pattern.sub(replacer, text)
+    return pattern.sub("", text)
