@@ -103,6 +103,13 @@ def _fetch_thread(client: WebClient, channel: str, thread_ts: str) -> list[dict]
     return messages
 
 
+_FILES_NOTE = {
+    "Bug":         "• Image/Video of the bug found in the files section of this bug",
+    "Enhancement": "• Image/Video of enhancement found in the files section of this enhancement",
+    "Feature":     "• Image/Video of feature found in the files section of this feature",
+}
+
+
 def _build_update_body(issue: dict, file_index: list[dict]) -> str:
     """Build the Monday update text. Each body line becomes a bullet point."""
     lines = []
@@ -111,6 +118,9 @@ def _build_update_body(issue: dict, file_index: list[dict]) -> str:
             line = line.strip()
             if line:
                 lines.append(f"• {line}")
+    if issue["files"]:
+        note = _FILES_NOTE.get(issue["label"], "• Image/Video found in the files section")
+        lines.append(note)
     return "\n".join(lines) if lines else ""
 
 
