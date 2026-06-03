@@ -105,10 +105,13 @@ def _fetch_thread(client: WebClient, channel: str, thread_ts: str) -> list[dict]
 
 
 _FILES_NOTE = {
-    "Bug":         "• Image/Video of the bug found in the files section of this bug",
-    "Enhancement": "• Image/Video of enhancement found in the files section of this enhancement",
-    "Feature":     "• Image/Video of feature found in the files section of this feature",
+    "Bug":         "• Image/Video of the bug can be found in the Files tab of this item",
+    "Enhancement": "• Image/Video of this enhancement can be found in the Files tab of this item",
+    "Feature":     "• Image/Video of this feature can be found in the Files tab of this item",
 }
+
+# Detects "Image 1", "Video 2", "(img 1 & 2)" etc. in the raw body text.
+_MEDIA_REF_RE = re.compile(r"\b(?:image|img|video|vid)\s*\d+", re.IGNORECASE)
 
 
 def _build_update_body(issue: dict, file_index: list[dict]) -> str:
@@ -119,8 +122,13 @@ def _build_update_body(issue: dict, file_index: list[dict]) -> str:
             line = line.strip()
             if line:
                 lines.append(f"• {line}")
-    if issue["files"]:
-        note = _FILES_NOTE.get(issue["label"], "• Image/Video found in the files section")
+
+    # Add the "see Files tab" note if files are attached to this issue OR the
+    # body references an image/video (the file may attach to a sibling bullet
+    # in a multi-bullet message, so don't rely on issue["files"] alone).
+    has_media = bool(issue["files"]) or bool(_MEDIA_REF_RE.search(issue["body"]))
+    if has_media:
+        note = _FILES_NOTE.get(issue["label"], "• Image/Video can be found in the Files tab of this item")
         lines.append(note)
     return "\n".join(lines) if lines else ""
 
