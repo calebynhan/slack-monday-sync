@@ -37,7 +37,7 @@ from slack_sdk import WebClient
 
 import monday_client
 from parser import parse_thread
-from utils import safe_item_name
+from utils import safe_item_name, resolve_image_refs
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -95,10 +95,11 @@ def _fetch_thread(client: WebClient, channel: str, thread_ts: str) -> list[dict]
     return messages
 
 
-def _build_update_body(issue: dict) -> str:
+def _build_update_body(issue: dict, file_index: list[dict]) -> str:
     parts = []
-    if issue["body"]:
-        parts.append(issue["body"])
+    body = resolve_image_refs(issue["body"], file_index) if issue["body"] else ""
+    if body:
+        parts.append(body)
     if issue["files"]:
         parts.append("\n*Attachments* (Slack login required to view):")
         for f in issue["files"]:
@@ -152,8 +153,16 @@ def handle_mention(event, client, say):
         if m.get("user") != bot_user_id and m.get("ts") != event["ts"]
     ]
 
+    all_messages = other_messages + [mention_msg]
+
+    # Build a sequential file index across all messages so (Image 1), (Image 2) etc. resolve correctly
+    from parser import _extract_files
+    file_index: list[dict] = []
+    for m in all_messages:
+        file_index.extend(_extract_files(m))
+
     # Parse: rest of thread first, then the mention message (so mention bullets aren't duplicated)
-    issues = parse_thread(other_messages + [mention_msg])
+    issues = parse_thread(all_messages)
 
     if not issues:
         say(
@@ -197,7 +206,7 @@ def handle_mention(event, client, say):
                 column_values=column_values if column_values else None,
             )
 
-            update_body = _build_update_body(issue)
+            update_body = _build_update_body(issue, file_index)
             monday_client.add_update(item_id, update_body)
 
             url = monday_client.get_item_url(board_id, item_id)
