@@ -7,6 +7,10 @@ Bug / Enhancement / Feature, and creates one Monday item per bullet:
   - Bug      → Bugs Queue board,    Dev Bugs Queue group
   - Enhancement / Feature → Enhancements board, Incoming Enhancements group
 
+To undo: @mention the bot with "revert" or "undo" in the same thread.
+  - Deletes every Monday item created from that thread.
+  - Only works once per thread (items are gone after deletion).
+
 Required environment variables (copy .env.example → .env and fill in):
   SLACK_BOT_TOKEN                 xoxb-...
   SLACK_SIGNING_SECRET            ...
@@ -22,6 +26,7 @@ Optional:
   SLACK_BOT_USER_ID               auto-fetched on first run if not set
   MONDAY_BUGS_REPORTER_COL        column ID for Reporter on Bugs board
   MONDAY_ENH_REPORTER_COL         column ID for Reporter on Enhancements board
+  UNDO_LOG_PATH                   path to undo log JSON (default: undo_log.json)
   PORT                            default 3000
 
 Run `python inspect_board.py` after setup to find group IDs, column IDs, and your user ID.
@@ -29,6 +34,7 @@ Run `python inspect_board.py` after setup to find group IDs, column IDs, and you
 
 import logging
 import os
+import re
 
 from dotenv import load_dotenv
 from slack_bolt import App
@@ -36,8 +42,8 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
 
 import monday_client
-from parser import parse_thread
-from utils import safe_item_name, resolve_image_refs
+from parser import parse_thread, _extract_files
+from utils import safe_item_name, resolve_image_refs, record_created, pop_created
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +71,8 @@ MAX_ITEMS_PER_RUN = 25
 
 _bot_user_id_cache: str = ""
 
+
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 def _get_bot_user_id(client: WebClient) -> str:
     global _bot_user_id_cache
@@ -112,15 +120,14 @@ def _routing(label: str) -> tuple[str, str, str]:
     if label == "Bug":
         return BUGS_BOARD_ID, BUGS_GROUP_ID, BUGS_REPORTER_COL
     else:
-        # Enhancement and Feature both go to the Enhancements board
         return ENH_BOARD_ID, ENH_GROUP_ID, ENH_REPORTER_COL
 
 
 def _strip_bot_mention(text: str, bot_user_id: str) -> str:
-    """Remove the @mention from the message so it doesn't interfere with parsing."""
-    import re
     return re.sub(rf"<@{bot_user_id}>", "", text).strip()
 
+
+# ── event handler ─────────────────────────────────────────────────────────────
 
 @app.event("app_mention")
 def handle_mention(event, client, say):
@@ -128,13 +135,47 @@ def handle_mention(event, client, say):
     thread_ts = event.get("thread_ts") or event["ts"]
     bot_user_id = _get_bot_user_id(client)
 
+    mention_text = _strip_bot_mention(event.get("text", ""), bot_user_id).lower()
+
+    # ── revert / undo ──────────────────────────────────────────────────────
+    if any(w in mention_text for w in ("revert", "undo", "delete")):
+        items = pop_created(thread_ts)
+        if not items:
+            say(
+                text=":shrug: No Monday items found to revert for this thread.",
+                thread_ts=thread_ts,
+            )
+            return
+
+        say(text=f":wastebasket: Reverting {len(items)} item(s)...", thread_ts=thread_ts)
+
+        deleted, failed = [], []
+        for item in items:
+            try:
+                monday_client.delete_item(item["item_id"])
+                deleted.append(f"• ~~{item['title']}~~")
+                log.info("Deleted Monday item %s ('%s')", item["item_id"], item["title"])
+            except monday_client.MondayError as exc:
+                log.error("Failed to delete item %s: %s", item["item_id"], exc)
+                failed.append(f"• `{item['title']}`: Monday API error (check logs)")
+            except Exception:
+                log.exception("Unexpected error deleting item %s", item["item_id"])
+                failed.append(f"• `{item['title']}`: Unexpected error (check logs)")
+
+        reply_parts = [f":white_check_mark: Deleted *{len(deleted)}* item(s) from Monday:"]
+        reply_parts.extend(deleted)
+        if failed:
+            reply_parts.append(f"\n:warning: *{len(failed)} could not be deleted:*")
+            reply_parts.extend(failed)
+
+        say(text="\n".join(reply_parts), thread_ts=thread_ts)
+        return
+
+    # ── create ────────────────────────────────────────────────────────────
     log.info("Trigger received in channel=%s thread=%s", channel, thread_ts)
 
-    # Build a synthetic message from the mention itself (bot mention stripped)
-    # so bullets written in the same message as @bot are parsed too.
-    mention_text = _strip_bot_mention(event.get("text", ""), bot_user_id)
     mention_msg = {
-        "text": mention_text,
+        "text": _strip_bot_mention(event.get("text", ""), bot_user_id),
         "user": event.get("user", ""),
         "ts": event["ts"],
         "files": event.get("files", []),
@@ -147,7 +188,6 @@ def handle_mention(event, client, say):
         say(text=":x: Could not read thread messages. Check bot channel permissions.", thread_ts=thread_ts)
         return
 
-    # Exclude bot messages and the mention message itself (we already have it above)
     other_messages = [
         m for m in thread_messages
         if m.get("user") != bot_user_id and m.get("ts") != event["ts"]
@@ -155,20 +195,18 @@ def handle_mention(event, client, say):
 
     all_messages = other_messages + [mention_msg]
 
-    # Build a sequential file index across all messages so (Image 1), (Image 2) etc. resolve correctly
-    from parser import _extract_files
     file_index: list[dict] = []
     for m in all_messages:
         file_index.extend(_extract_files(m))
 
-    # Parse: rest of thread first, then the mention message (so mention bullets aren't duplicated)
     issues = parse_thread(all_messages)
 
     if not issues:
         say(
             text=(
                 ":mag: No items found. Make sure your bullets use the format:\n"
-                "`• Bug: Title here`  or  `• Enhancement: Title`  or  `• Feature: Title`"
+                "`• Bug: Title here`  or  `• Enhancement: Title`  or  `• Feature: Title`\n\n"
+                "To undo a previous sync: `@issue-bot revert`"
             ),
             thread_ts=thread_ts,
         )
@@ -187,6 +225,7 @@ def handle_mention(event, client, say):
     say(text=f":hourglass: Creating {len(issues)} item(s) on Monday...", thread_ts=thread_ts)
 
     created_links = []
+    created_log = []
     errors = []
 
     for issue in issues:
@@ -206,13 +245,13 @@ def handle_mention(event, client, say):
                 column_values=column_values if column_values else None,
             )
 
-            update_body = _build_update_body(issue, file_index)
-            monday_client.add_update(item_id, update_body)
+            monday_client.add_update(item_id, _build_update_body(issue, file_index))
 
             url = monday_client.get_item_url(board_id, item_id)
             created_links.append(
                 f"• *[{issue['label']}]* {issue['title']} → <{url}|View on Monday>"
             )
+            created_log.append({"item_id": item_id, "title": issue["title"], "board_id": board_id})
             log.info("Created Monday item %s for '%s' on board %s", item_id, issue["title"], board_id)
 
         except monday_client.MondayError as exc:
@@ -222,11 +261,16 @@ def handle_mention(event, client, say):
             log.exception("Unexpected error creating Monday item for '%s'", issue.get("title"))
             errors.append(f"• `{issue.get('title', '?')}`: Unexpected error (check logs)")
 
+    if created_log:
+        record_created(thread_ts, created_log)
+
     reply_parts = [f":white_check_mark: Created *{len(created_links)}* item(s) on Monday:"]
     reply_parts.extend(created_links)
     if errors:
         reply_parts.append(f"\n:warning: *{len(errors)} failed:*")
         reply_parts.extend(errors)
+    if created_log:
+        reply_parts.append("\n_To undo: `@issue-bot revert`_")
 
     say(text="\n".join(reply_parts), thread_ts=thread_ts)
 

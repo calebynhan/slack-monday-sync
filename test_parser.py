@@ -268,3 +268,20 @@ def test_resolve_video_refs():
 def test_resolve_image_refs_no_refs_unchanged():
     from utils import resolve_image_refs as _resolve_image_refs
     assert _resolve_image_refs("No references here", []) == "No references here"
+
+
+# ── undo log ──────────────────────────────────────────────────────────────────
+
+def test_undo_log_record_and_pop(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNDO_LOG_PATH", str(tmp_path / "undo_log.json"))
+    from utils import record_created, pop_created
+    items = [{"item_id": "111", "title": "Login crash", "board_id": "5027492058"}]
+    record_created("123.456", items)
+    assert pop_created("123.456") == items
+    assert pop_created("123.456") == []  # already cleared
+
+
+def test_undo_log_missing_thread_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNDO_LOG_PATH", str(tmp_path / "undo_log.json"))
+    from utils import pop_created
+    assert pop_created("nonexistent") == []
