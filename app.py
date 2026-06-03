@@ -219,9 +219,13 @@ def handle_mention(event, client, say):
 
     all_messages = other_messages + [mention_msg]
 
+    # Build file_index only from messages by the same user who triggered the bot,
+    # so (Image 1) / (Video 2) refs only count that user's own attachments.
+    triggering_user = event.get("user", "")
     file_index: list[dict] = []
     for m in all_messages:
-        file_index.extend(_extract_files(m))
+        if m.get("user") == triggering_user:
+            file_index.extend(_extract_files(m))
 
     issues = parse_thread(all_messages)
 
