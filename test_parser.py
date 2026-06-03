@@ -68,6 +68,23 @@ def test_body_lines_captured():
     assert "Steps: open app, tap login" in issues[0]["body"]
 
 
+def test_sub_bullet_characters_stripped_from_body():
+    text = (
+        "• Bug: Some interactives are confusing\n"
+        "  ○ Page: lesson editor\n"
+        "  ○ Note: graph is broken\n"
+        "  ○ Goal: clear and useful\n"
+        "  ○ Video 2"
+    )
+    issues = _parse_message(text, "U123", "111")
+    assert len(issues) == 1
+    body = issues[0]["body"]
+    assert "Page: lesson editor" in body
+    assert "Note: graph is broken" in body
+    assert "Video 2" in body
+    assert "○" not in body
+
+
 def test_body_belongs_to_correct_bullet():
     text = (
         "• Bug: First bug\n"
@@ -238,7 +255,36 @@ def test_resolve_image_refs_out_of_range_unchanged():
     from utils import resolve_image_refs as _resolve_image_refs
     file_index = [{"name": "a.png", "url": "https://slack.com/a"}]
     result = _resolve_image_refs("See (Image 5)", file_index)
-    assert result == "See (Image 5)"
+    assert "file 5 not found" in result
+
+
+def test_resolve_image_refs_bare_no_parens():
+    from utils import resolve_image_refs as _resolve_image_refs
+    file_index = [{"name": "shot.png", "url": "https://slack.com/s"}]
+    assert "shot.png" in _resolve_image_refs("Image 1", file_index)
+    assert "shot.png" in _resolve_image_refs("Video 1", file_index)
+
+
+def test_resolve_image_refs_multi_ampersand():
+    from utils import resolve_image_refs as _resolve_image_refs
+    file_index = [
+        {"name": "a.png", "url": "https://slack.com/a"},
+        {"name": "b.png", "url": "https://slack.com/b"},
+    ]
+    result = _resolve_image_refs("Image 1 & 2", file_index)
+    assert "a.png" in result
+    assert "b.png" in result
+
+
+def test_resolve_image_refs_multi_comma():
+    from utils import resolve_image_refs as _resolve_image_refs
+    file_index = [
+        {"name": "a.png", "url": "https://slack.com/a"},
+        {"name": "b.png", "url": "https://slack.com/b"},
+    ]
+    result = _resolve_image_refs("(Image 1, 2)", file_index)
+    assert "a.png" in result
+    assert "b.png" in result
 
 
 def test_resolve_image_refs_case_insensitive():

@@ -44,11 +44,35 @@ def pop_created(thread_ts: str) -> list[dict]:
 
 
 def resolve_image_refs(text: str, file_index: list[dict]) -> str:
-    """Replace (Image N) / (img N) / (Video N) / (vid N) with the actual Slack file name + URL."""
-    def replacer(m):
-        n = int(m.group(1))
+    """
+    Resolve file references in body text to Slack file name + URL.
+
+    Supported formats (with or without parentheses):
+      Image 1         (Image 1)
+      Video 2         (Video 2)
+      Image 1 & 2     (Image 1 & 2)
+      Image 1, 2      (img 1, 2)
+    """
+    def _link(n: int) -> str:
         if 1 <= n <= len(file_index):
             f = file_index[n - 1]
             return f"{f['name']}: {f['url']}"
-        return m.group(0)
-    return re.sub(r"\((?:image|img|video|vid)\s*(\d+)\)", replacer, text, flags=re.IGNORECASE)
+        return f"(file {n} not found)"
+
+    def replacer(m):
+        n1 = int(m.group(2))
+        n2 = m.group(3)
+        if n2:
+            return f"{_link(n1)}\n{_link(int(n2))}"
+        return _link(n1)
+
+    # Matches: optional ( + keyword + N + optional (& or ,) + optional N2 + optional )
+    pattern = re.compile(
+        r"\(?"
+        r"(image|img|video|vid)"
+        r"\s*(\d+)"
+        r"(?:\s*[&,]\s*(\d+))?"
+        r"\)?",
+        re.IGNORECASE,
+    )
+    return pattern.sub(replacer, text)

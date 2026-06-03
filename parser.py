@@ -16,11 +16,14 @@ import re
 from typing import Optional
 
 BULLET_RE = re.compile(
-    r"^[\-\*••]?\s*"           # optional bullet character
+    r"^[\-\*•·]?\s*"                         # optional top-level bullet
     r"(bug|enhancement|feature)\s*[:\-]\s*"  # label
-    r"(.+)",                          # title (rest of line)
+    r"(.+)",                                  # title (rest of line)
     re.IGNORECASE,
 )
+
+# Sub-bullet characters to strip from body lines (○ ◦ – — · etc.)
+SUB_BULLET_RE = re.compile(r"^[○◦\-–—·>]+\s*")
 
 LABEL_ALIASES = {
     "bug": "Bug",
@@ -90,7 +93,7 @@ def _parse_message(text: str, user: str, ts: str) -> list[dict]:
             }
             body_lines = []
         elif current is not None:
-            stripped = line.strip()
+            stripped = SUB_BULLET_RE.sub("", line.strip())
             if stripped:
                 body_lines.append(stripped)
 
