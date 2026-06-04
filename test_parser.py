@@ -300,3 +300,26 @@ def test_undo_log_missing_thread_returns_empty(tmp_path, monkeypatch):
     monkeypatch.setenv("UNDO_LOG_PATH", str(tmp_path / "undo_log.json"))
     from utils import pop_created
     assert pop_created("nonexistent") == []
+
+
+def test_record_created_appends_across_calls(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNDO_LOG_PATH", str(tmp_path / "undo_log.json"))
+    from utils import record_created, get_created_titles
+    record_created("ts1", [{"item_id": "1", "title": "Bug A", "board_id": "x"}])
+    record_created("ts1", [{"item_id": "2", "title": "Bug B", "board_id": "x"}])
+    titles = get_created_titles("ts1")
+    assert "bug a" in titles
+    assert "bug b" in titles
+
+
+def test_get_created_titles_case_insensitive(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNDO_LOG_PATH", str(tmp_path / "undo_log.json"))
+    from utils import record_created, get_created_titles
+    record_created("ts2", [{"item_id": "3", "title": "Login Crash", "board_id": "x"}])
+    assert "login crash" in get_created_titles("ts2")
+
+
+def test_get_created_titles_empty_for_new_thread(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNDO_LOG_PATH", str(tmp_path / "undo_log.json"))
+    from utils import get_created_titles
+    assert get_created_titles("new_thread") == set()

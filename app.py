@@ -44,7 +44,7 @@ from slack_sdk import WebClient
 
 import monday_client
 from parser import parse_thread, _extract_files
-from utils import safe_item_name, resolve_image_refs, record_created, pop_created
+from utils import safe_item_name, resolve_image_refs, record_created, pop_created, get_created_titles
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -259,6 +259,18 @@ def handle_mention(event, client, say):
         )
         return
 
+    # Filter out issues already created from this thread (duplicate @mention guard)
+    already_created = get_created_titles(thread_ts)
+    skipped = [i for i in issues if i["title"].lower() in already_created]
+    issues = [i for i in issues if i["title"].lower() not in already_created]
+
+    if not issues and skipped:
+        say(
+            text=":white_check_mark: All items in this thread have already been added to Monday.",
+            thread_ts=thread_ts,
+        )
+        return
+
     say(text=f":hourglass: Creating {len(issues)} item(s) on Monday...", thread_ts=thread_ts)
 
     created_links = []
@@ -321,6 +333,9 @@ def handle_mention(event, client, say):
 
     reply_parts = [f":white_check_mark: Created *{len(created_links)}* item(s) on Monday:"]
     reply_parts.extend(created_links)
+    if skipped:
+        reply_parts.append(f"\n:skip: *{len(skipped)} already existed (skipped):*")
+        reply_parts.extend(f"• {i['title']}" for i in skipped)
     if errors:
         reply_parts.append(f"\n:warning: *{len(errors)} failed:*")
         reply_parts.extend(errors)
