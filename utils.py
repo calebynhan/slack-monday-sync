@@ -32,8 +32,15 @@ def save_undo_log(log_data: dict) -> None:
 
 def record_created(thread_ts: str, items: list[dict]) -> None:
     log_data = load_undo_log()
-    log_data[thread_ts] = items
+    existing = log_data.get(thread_ts, [])
+    log_data[thread_ts] = existing + items
     save_undo_log(log_data)
+
+
+def get_created_titles(thread_ts: str) -> set[str]:
+    """Return the set of lowercased titles already created for this thread."""
+    log_data = load_undo_log()
+    return {item["title"].lower() for item in log_data.get(thread_ts, [])}
 
 
 def pop_created(thread_ts: str) -> list[dict]:
