@@ -1,0 +1,11 @@
+# Fly.io config for slack-monday-sync bot (Socket Mode — no HTTP port needed)
+app = "slack-monday-sync"
+primary_region = "sea"
+
+[build]
+
+[env]
+  PORT = "3000"
+
+# No [[services]] or [[http_service]] — this is a background worker, not a web server.
+# Socket Mode connects outward to Slack; no inbound traffic needed.
